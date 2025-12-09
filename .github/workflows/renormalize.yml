@@ -1,1 +1,23 @@
-run: git add --renormalize 
+name: Renormalize repository line endings
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_branch:
+        description: 'Base branch to open PR against'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  renormalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Renormalize all files
+        run: |
+          git add --renormalize .
+      - name: Done
+        run: echo "Renormalize job finished"

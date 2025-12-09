@@ -1,2 +1,2 @@
-*.dpr -encoding=CP866
+*.dpr -encoding=CP-866
 README.md -linguist-documentation

@@ -1,2 +1,2 @@
-*.dpr working-tree-encoding=cp1251
+*.dpr text working-tree-encoding=cp1251 encoding=cp1251
 README.md -linguist-documentation

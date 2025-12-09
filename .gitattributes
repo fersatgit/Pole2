@@ -1,0 +1,2 @@
+*.dpr -encoding=CP866
+README.md -linguist-documentation

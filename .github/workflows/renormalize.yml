@@ -18,5 +18,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Renormalize all files
-        run: |
-          git add --renormalize .
+        run: git add --renormalize .

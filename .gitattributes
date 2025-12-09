@@ -1,2 +1,2 @@
-*.dpr text encoding=win-1251
+*.dpr text encoding=cp1251
 README.md -linguist-documentation

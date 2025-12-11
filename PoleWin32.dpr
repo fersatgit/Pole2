@@ -1,6 +1,7 @@
 //Writed in Delphi 7
 //To compile from IDE press Ctrl+F9
 //This is not a unit but a program. This hack reduses output file size.
+//program PoleWin32;
 unit PoleWin32;
 {$IMAGEBASE $400000}{$E .exe}{$G-}{$R-}{$I-}{$M-}{$Y-}{$D-}{$C-}{$L-}{$Q-}{$O+}
 interface
@@ -12,6 +13,8 @@ uses
 {$I DSound.inc}  
 
 function wsprintfA(buf,fmt: PAnsiChar): dword;cdecl;varargs;external user32;
+function wsprintfW(buf,fmt: PWideChar): dword;cdecl;varargs;external user32;
+function CreateWindowExW(dwExStyle: dword;lpClassName,lpWindowName: PWideChar;dwStyle: dword;X,Y,nWidth,nHeight: integer;hWndParent,hMenu,hInstance: dword;lpParam: pointer): dword;stdcall;external user32;
 
 type
   BITMAPINFO = packed record
@@ -20,10 +23,15 @@ type
   end;
   TCharacter=packed record
              SpriteID: word;
-             Name:     String[10];
+             Name:     String[11];
              end;
   TQuestion=String[20];
-  TString  =String[255];
+  bytearr=array[0..high(integer)-1] of byte;
+  pbyte=^bytearr;
+  smallintarr=array[0..high(integer) div 2-1] of smallint;
+  psmallint=^smallintarr;
+  TQuestionarr=array[0..high(integer) div sizeof(TQuestion)-1] of TQuestion;
+  PQuestion=^TQuestionarr;
 
 const
   FORTUNE_WHEEL0        = 0;
@@ -96,8 +104,9 @@ const
 var
   wnd,DC,KeyPressed,Enter:   THandle;
   Rect:                      TRECT;
+  ClientRect:                TRECT=(Right:640;Bottom:350);
   msg:                       tagMSG;
-  _DSound:                   IDirectSound;
+  _DSound:                   PPDirectSound;
   PCM:                       WaveFormatEx=(wFormatTag:      WAVE_FORMAT_PCM;
                                             nChannels:      1;
                                             nSamplesPerSec: 8000;
@@ -107,7 +116,7 @@ var
   PlayBufferDesc:            DSBUFFERDESC=(dwSize:      SizeOf(DSBUFFERDESC);
                                            dwFlags:     0;
                                            lpwfxFormat: @PCM);
-  PlayBuffer:                IDirectSoundBuffer;
+  PlayBuffer:                PPDirectSoundBuffer;
   bmi:                       BITMAPINFO=(bmiHeader: (biSize:      sizeof(tagBITMAPINFOHEADER);
                                                      biWidth:     640;
                                                      biHeight:    -350;
@@ -125,7 +134,7 @@ var
                                                    LabelOfs:      dword;
                                                    MoneyOfs:      dword;
                                                    Score:         dword;
-                                                   Caption,Name:  string[10];
+                                                   Caption,Name:  String[11];
                                             end=((Sprite:(ofs:$D0+$76*640);TalkBubbleOfs:$D0+$76*640-17888;LabelOfs:$78*640+$122;MoneyOfs:$76*640+$78;Caption:'1-ый ИГРОК'),
                                                  (Sprite:(ofs:$8+$DB*640);TalkBubbleOfs:$8+$DB*640-17888;LabelOfs:($DF+$50)*640+$4;MoneyOfs:$C1*640+$18;Caption:'2-ой ИГРОК'),
                                                  (Sprite:(ofs:$168+$DB*640);TalkBubbleOfs:$168+$DB*640-17888;LabelOfs:($DF+$50)*640+$164;MoneyOfs:$C1*640+$178;Caption:'3-ий ИГРОК'));
@@ -141,12 +150,12 @@ var
   PerfCounter2Milliseconds:  single;
   buf:                       String[255];
   AudioBuf:                  array[0..AudioBufLen-1] of smallint;
-  Samples:                   array of smallint;
+  Samples:                   psmallint;
   UserInput:                 packed record
-                             Buf:             ^TQuestion;
+                             Buf:             PAnsiChar;
                              MaxLen,Ofs,Span: dword;
                              end;
-  Frame:                     dword;
+  Frame,Fullscreen:          dword;
   HandOfs,HandOfsPrev,HandMin,HandMax,HandStep: dword;
 
 procedure Delay(duration: dword);
@@ -167,11 +176,11 @@ end;
 procedure PlayWAV(WAVData: pointer; size: dword);
 var
   i,j,rem: dword;
-  data:    array of byte absolute WAVData;
+  data:    pbyte absolute WAVData;
 begin
   if EnableSound>0 then
   begin
-    PlayBuffer.GetCurrentPosition(@j,@i);
+    PlayBuffer^.GetCurrentPosition(PlayBuffer^,@j,@i);
     rem:=AudioBufSize-j;
     if rem<size then
     begin
@@ -190,7 +199,7 @@ var
   j:             dword;
   PulseWide,Pos: single;
   ampValue:      smallint;
-  Samples:       array of smallint absolute Buf;
+  Samples:       psmallint absolute Buf;
 begin
   if freq<>0 then
   begin
@@ -224,7 +233,7 @@ var
 begin
   if EnableSound>0 then
   begin
-    PlayBuffer.GetCurrentPosition(@j,@i);
+    PlayBuffer^.GetCurrentPosition(PlayBuffer^,@j,@i);
     PWM(Samples,i shr 1,freq,duration);
   end;
   Delay(duration);
@@ -238,7 +247,7 @@ end;
 procedure DrawSprite(var _data;_ofs: dword;TransparentColor: byte);
 var
   f,i,j,k,ofs: dword;
-  data:        array of byte absolute _data;
+  data:        pbyte absolute _data;
 begin
   j:=pword(@data[2])^;
   i:=6;
@@ -330,7 +339,7 @@ begin
   pointer(Font):=0;
 end;}
 
-procedure Print(const Text: TString;Ofs,Color,GlyphHeight,Span: dword);stdcall;
+procedure Print(const Text: PAnsiChar;Ofs,Color,GlyphHeight,Span: dword);stdcall;
 const
   mask: int64=$0102040810204080;
 asm
@@ -338,29 +347,25 @@ asm
   mov     edx,[Ofs]
   pxor    mm3,mm3
   mov     esi,[Text]
-  movzx   edi,byte[esi]
-  lea     esi,[esi+edi+1]
-  neg     edi
   mov     eax,[Color]
   mov     ah,al
   movd    mm4,eax
   pshufw  mm4,mm4,0
   mov     ebp,[GlyphHeight]
-  mov     eax,offset Fonts.c
+  mov     edi,offset Fonts.c
   mov     ecx,offset Fonts.b
   mov     ebx,offset Fonts.a
   cmp     ebp,6
-  cmove   eax,ebx
+  cmove   edi,ebx
   cmp     ebp,8
-  cmove   eax,ecx
+  cmove   edi,ecx
   xor     ebx,ebx
-  @Chr:movzx ecx,byte[esi+edi]
+  @Chr:movzx ecx,byte[esi]
        sub   ebx,ebp
        imul  ecx,ebp
        add   ecx,ebp
        push  edx
-       push  eax
-       add   eax,ecx
+       lea   eax,[edi+ecx]
        @Row:mov     cl,[eax+ebx]
             mov     ch,cl
             movd    mm0,ecx
@@ -375,10 +380,10 @@ asm
             add     edx,640
             inc     ebx
        jne @Row
-       pop   eax
        pop   edx
        add   edx,[esp+56] //Span
-       inc   edi
+       inc   esi
+       cmp   byte[esi],0
   jne @Chr
   emms
   popad
@@ -503,7 +508,7 @@ begin
   DrawSprite(Sprites[YAKUBOVICH_EYES_OPEN],$D1*640+$214,16);
 end;
 
-procedure YakubovichTalk(const s1,s2: TString);
+procedure YakubovichTalk(const s1,s2: PAnsiChar);
 var
   i: integer;
 begin
@@ -529,8 +534,8 @@ begin
 
   ScreenCopy(161,40,BACKBUF+$164DF,$164DF);
   DrawSprite(Sprites[SPEECH_BUBBLE],$164DF,1);
-  Print(s1,$91*640+$22E-(length(s1) shl 2),0,14,8);
-  Print(s2,$9E*640+$22E-(length(s2) shl 2),0,14,8);
+  Print(s1,$91*640+$22E-(lstrlenA(s1) shl 2),0,14,8);
+  Print(s2,$9E*640+$22E-(lstrlenA(s2) shl 2),0,14,8);
   SpeechSound;
   DrawSprite(Sprites[YAKUBOVICH_EYES_OPEN],$214+$C9*640,16);
   Delay(100);
@@ -546,7 +551,8 @@ begin
     Buf[0]:=chr(wsprintfA(@Buf[1],fmt,param))
   else
     Buf[0]:=chr(wsprintfA(@Buf[1],fmt));
-  Print(Buf,Ofs+8*640+44-(ord(Buf[0]) shl 2),0,14,8);
+  Buf[ord(Buf[0])+1]:=#0;
+  Print(@Buf[1],Ofs+8*640+44-(ord(Buf[0]) shl 2),0,14,8);
   WaitForSingleObject(KeyPressed,1000);
   ScreenCopy(84,39,Ofs,BACKBUF2);
 end;
@@ -569,30 +575,31 @@ begin
       end;
       DrawSprite(Sprites[MONEY],MoneyOfs,1);
       Buf[0]:=chr(wsprintfA(@Buf[1],'%u',Score));
+      Buf[ord(Buf[0])+1]:=#0;
       i:=MoneyOfs+$22-(ord(Buf[0]) shl 2)+4*640;
-      Print(Buf,i-641,0,14,8);
-      Print(Buf,i-639,0,14,8);
-      Print(Buf,i+639,0,14,8);
-      Print(Buf,i+641,0,14,8);
-      Print(Buf,i,15,14,8);
+      Print(@Buf[1],i-641,0,14,8);
+      Print(@Buf[1],i-639,0,14,8);
+      Print(@Buf[1],i+639,0,14,8);
+      Print(@Buf[1],i+641,0,14,8);
+      Print(@Buf[1],i,15,14,8);
     end;
   end;
 end;
 
-function PlayerDecision(Str1,Str2,Phrase1,Phrase2: AnsiString): integer;stdcall;
+function PlayerDecision(Str1,Str2,Phrase1,Phrase2: PAnsiChar): integer;stdcall;
 const
   DecisionAnim: array[0..4] of dword=(PLAYER_CHOOSE_LEFT,PLAYER_LEFT,PLAYER,PLAYER_RIGHT,PLAYER_CHOOSE_RIGHT);
 var
-  Phrases: array[0..1] of AnsiString absolute Phrase1;
+  Phrases: array[0..1] of PAnsiChar absolute Phrase1;
   i:       dword;
 begin
   with Players[CurPlayer] do
   begin
     ScreenCopy(125,30,BACKBUF2,MoneyOfs-30*640-24); //SNIKERS sprite size is 61x14
     ScreenCopy(125,30,BACKBUF2+125,MoneyOfs-24);
-    if length(Str1)>0 then
+    if Str1^>#0 then
     begin
-      FillRect(MoneyOfs-644,30,84,7);             //Money sprite size is 73x24
+      FillRect(MoneyOfs-644,30,84,7);               //Money sprite size is 73x24
       DrawSprite(Sprites[SNIKERS],MoneyOfs-24,2);
       DrawSprite(Sprites[SNIKERS],MoneyOfs+40,2);
       Print(Str1,MoneyOfs-30*640-16,0,14,8);
@@ -625,17 +632,19 @@ begin
     ScreenCopy(125,30,MoneyOfs-30*640-24,BACKBUF2);
     ScreenCopy(125,30,MoneyOfs-24,BACKBUF2+125);
     YakubovichSetSilent;
-    PlayerTalk(TalkBubbleOfs,@Phrases[result][1],0);
+    PlayerTalk(TalkBubbleOfs,Phrases[result],0);
   end;
 end;
 
 function OpenFile(filename: PWideChar): THandle;
+var
+  Buf: array[0..255] of WideChar;
 begin
   result:=CreateFileW(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
   if result=INVALID_HANDLE_VALUE then
   begin
-    Buf[wsprintfA(@Buf,'file %s not found')]:=#0;
-    MessageBoxA(wnd,@Buf,0,0);
+    Buf[wsprintfW(@Buf,'file %s not found',filename)]:=#0;
+    MessageBoxW(wnd,@Buf,0,0);
     ExitProcess(0);
   end;
 end;
@@ -646,7 +655,8 @@ end;
 
 function WndProc(wnd,msg,wParam,lParam: dword): dword;stdcall;
 var
-  C: AnsiChar;
+  C:   array[0..1] of AnsiChar;
+  w,h: single;
 begin
   result:=0;
   case msg of
@@ -654,12 +664,46 @@ begin
         WM_TIMER,
         WM_PAINT:begin
                  inc(frame);
-                 if (UserInput.MaxLen>0)and(ord(UserInput.Buf^[0])<UserInput.MaxLen) then
+                 if (UserInput.MaxLen>0)and(ord(UserInput.Buf[0])<UserInput.MaxLen) then
                    FillRect(UserInput.Ofs+12*640,2,8,((frame div 25) and 1)*7);           //blink caret every 0.5 sec
-                 StretchDIBits(DC,0,0,bmi.bmiHeader.biWidth,-bmi.bmiHeader.biHeight,0,0,bmi.bmiHeader.biWidth,-bmi.bmiHeader.biHeight,@Screen,Windows.PBITMAPINFO(@bmi)^,DIB_RGB_COLORS,SRCCOPY);
+                 BitBlt(DC,0,0,ClientRect.Right,ClientRect.Top,DC,0,0,BLACKNESS);
+                 BitBlt(DC,0,ClientRect.Top+ClientRect.Bottom,ClientRect.Right,ClientRect.Top,DC,0,0,BLACKNESS);
+                 BitBlt(DC,0,0,ClientRect.Left,Rect.Bottom,DC,0,0,BLACKNESS);
+                 BitBlt(DC,ClientRect.Left+ClientRect.Right,0,ClientRect.Left,Rect.Bottom,DC,0,0,BLACKNESS);
+                 StretchDIBits(DC,ClientRect.Left,ClientRect.Top,ClientRect.Right,ClientRect.Bottom,0,0,bmi.bmiHeader.biWidth,-bmi.bmiHeader.biHeight,@Screen,Windows.PBITMAPINFO(@bmi)^,DIB_RGB_COLORS,SRCCOPY);
                  ValidateRect(wnd,0);
                  end;
-       WM_HOTKEY:if(_DSound<>nil)and(PlayBuffer<>nil)then
+         WM_SIZE:begin
+                 GetClientRect(wnd,ClientRect);
+                 w:=ClientRect.Right/640;
+                 h:=ClientRect.Bottom/350;
+                 if h<w then
+                   w:=h;
+                 h:=w*350;
+                 w:=w*640;
+                 ClientRect.Left:=round(ClientRect.Right-w) shr 1;
+                 ClientRect.Top:=round(ClientRect.Bottom-h) shr 1;
+                 ClientRect.Right:=round(w);
+                 ClientRect.Bottom:=round(h);
+                 WndProc(wnd,WM_MOVE,0,0);
+                 end;
+         WM_MOVE:if Fullscreen=0 then
+                  GetWindowRect(wnd,Rect);
+       WM_HOTKEY:if wParam=2 then
+                 begin
+                   Fullscreen:=Fullscreen xor 1;
+                   if Fullscreen<>0 then
+                   begin
+                     SetWindowLongW(wnd,GWL_STYLE,WS_VISIBLE);
+                     MoveWindow(wnd,0,0,GetSystemMetrics(SM_CXSCREEN),GetSystemMetrics(SM_CYSCREEN),false);
+                   end
+                   else
+                   begin
+                     SetWindowLongW(wnd,GWL_STYLE,WS_VISIBLE+WS_OVERLAPPEDWINDOW);
+                     MoveWindow(wnd,Rect.Left,Rect.Top,Rect.Right-Rect.Left,Rect.Bottom-Rect.Top,false);
+                   end;
+                 end
+                 else if(_DSound<>nil)and(PlayBuffer<>nil)then
                    EnableSound:=EnableSound xor 1;
       WM_KEYDOWN:case wParam of
                     VK_LEFT:if handOfs>handMin then
@@ -692,23 +736,24 @@ begin
                  begin
                    CharUpperW(@wParam);
                    WideCharToMultiByte(866,0,@wParam,1,@C,1,0,0);
-                   case C of
+                   c[1]:=#0;
+                   case C[0] of
                    #0:;
-                   #8:if ord(UserInput.Buf^[0])>0 then
+                   #8:if ord(UserInput.Buf[0])>0 then
                       begin
                         FillRect(UserInput.Ofs,14,8,7);
-                        dec(UserInput.Buf^[0]);
+                        dec(UserInput.Buf[0]);
                         dec(UserInput.Ofs,UserInput.Span);
                         FillRect(UserInput.Ofs,14,8,7);
                       end;
                    else if (lParam and (1 shl 29)=0)and(C>='0') then
                    begin
-                     if ord(UserInput.Buf^[0])<UserInput.MaxLen then
+                     if ord(UserInput.Buf[0])<UserInput.MaxLen then
                      begin
                        FillRect(UserInput.Ofs,14,8,7);
                        Print(C,UserInput.Ofs,0,14,8);
-                       inc(UserInput.Buf^[0]);
-                       UserInput.Buf^[ord(UserInput.Buf^[0])]:=C;
+                       inc(UserInput.Buf[0]);
+                       UserInput.Buf[ord(UserInput.Buf[0])]:=C[0];
                        inc(UserInput.Ofs,UserInput.Span);
                      end;
                    end
@@ -724,6 +769,22 @@ begin
   end;
 end;
 
+function str2int(str: PAnsiChar): dword;
+asm
+  push  ebx
+  xor   ecx,ecx
+  movzx ebx,[eax-1]
+  @str2int:
+    movzx edx,byte[eax]
+    inc   eax
+    lea   ecx,[ecx*4+ecx]
+    lea   ecx,[ecx*2+edx-'0']
+    dec   ebx
+  jne @str2int
+  mov   eax,ecx
+  pop   ebx
+end;
+
 ////////////////////////////////////////////////////////////////////////////////
 // GAME THREAD
 ////////////////////////////////////////////////////////////////////////////////
@@ -733,13 +794,13 @@ label
   ChooseLetter,OpenLetter,SelectWord,RemovePlayer,NextPlayer,Adware,debug;
 const
   //'╧хЁт√щ шуЁюъ','┬ЄюЁющ шуЁюъ','╥ЁхЄшщ шуЁюъ'
-  PlayerNames:  array[0..2] of string[12]=('Первый игрок','Второй игрок','Третий игрок');
+  PlayerNames:  array[0..2] of String[13]=('Первый игрок','Второй игрок','Третий игрок');
   //'╠╚╦╦╚╬═','╤╥╬ ╥█┘','╥█┘└','╤╥╬'
-  Values:       array[0..3] of string[8]=('МИЛЛИОН','СТО ТЫЩ','ТЫЩА','СТО');
+  Values:       array[0..3] of PAnsiChar=('МИЛЛИОН','СТО ТЫЩ','ТЫЩА','СТО');
   //'╟╙┴═╙▐ ┘┼╥╩╙','╧юЁю°юъ ARIEL','╨рёўхёЄъє фы  єёют','╟єсюўшёЄъє','╩Ёєу фы  єэшЄрчр','╨єыюэ ь уъющ сєьруш','╪эєЁъш фы  ърыю°','╧юфЄ цъш фы  эюёъют','┴хЁє°ш фы  є°хщ','╧штэє■ юЄъЁ√тр°ъє'
-  Prizes:       array[0..9] of String[20]=('ЗУБНУЮ ЩЕТКУ','Порошок ARIEL','Расчестку для усов','Зубочистку','Круг для унитаза','Рулон мягкой бумаги','Шнурки для калош','Подтяжки для носков','Беруши для ушей','Пивную открывашку');
+  Prizes:       array[0..9] of PAnsiChar=('ЗУБНУЮ ЩЕТКУ','Порошок ARIEL','Расчестку для усов','Зубочистку','Круг для унитаза','Рулон мягкой бумаги','Шнурки для калош','Подтяжки для носков','Беруши для ушей','Пивную открывашку');
   //'1/64 ╘╚═└╦└','1/32 ╘╚═└╦└','1/16 ╘╚═└╦└','1/8 ╘╚═└╦└','1/4 ╘╚═└╦└','╧╬╦╙╘╚═└╦','╘╚═└╦','╤╙╧┼╨╘╚═└╦'
-  StageNames:   array[0..7] of AnsiString=('1/64 ФИНАЛА','1/32 ФИНАЛА','1/16 ФИНАЛА','1/8 ФИНАЛА','1/4 ФИНАЛА','ПОЛУФИНАЛ','ФИНАЛ','СУПЕРФИНАЛ');
+  StageNames:   array[0..7] of String[12]=('1/64 ФИНАЛА','1/32 ФИНАЛА','1/16 ФИНАЛА','1/8 ФИНАЛА','1/4 ФИНАЛА','ПОЛУФИНАЛ','ФИНАЛ','СУПЕРФИНАЛ');
   SectorValues: array[0..15] of dword=(0,5,0,20,0,10,0,15,25,10,0,5,0,20,0,15);
 var
   f:                                  THandle;
@@ -748,31 +809,31 @@ var
   LettersForBox,CurWord,Winner:       dword;
   Stage,CurSector,QuestionsCount:     dword;
   i,j,k,n:                            integer;
-  C:                                  AnsiChar;
+  C:                                  array[0..1] of AnsiChar;
   AssistPos:                          array[0..19] of dword;
-  GuessedWord:                        ^TQuestion;
+  GuessedWord:                        String[sizeof(TQuestion)];
   TopPlayers:                         array[0..7] of packed record
-                                                     Name:  string[10];
+                                                     Name:  String[10];
                                                      Score: word;
                                                      end;
-  Questions:                          array of TQuestion;
-  AvailableLetters:                   string[31];
+  Questions:                          PQuestion;
+  AvailableLetters:                   array[0..31] of AnsiChar;
   PrevWords:                          array[0..7] of integer;
   PerfFreq:                           int64;
-  data:                               array of byte;
+  data:                               pbyte;
 begin
   //DirectSound initialization
   QueryPerformanceFrequency(PerfFreq);
   PerfCounter2Milliseconds:=PerfFreq*0.001;
   if DirectSoundCreate(@DSDEVID_DefaultPlayback,_DSound, nil)=0 then
   begin
-    _DSound.SetCooperativeLevel(wnd,DSSCL_PRIORITY);
+    _DSound^.SetCooperativeLevel(_DSound^,wnd,DSSCL_PRIORITY);
     PlayBufferDesc.dwBufferBytes:=AudioBufSize;
-    if _DSound.CreateSoundBuffer(PlayBufferDesc,PlayBuffer,nil)=0 then
+    if _DSound^.CreateSoundBuffer(_DSound^,PlayBufferDesc,PlayBuffer,nil)=0 then
     begin
-      while PlayBuffer.Lock(0,size,@Samples,@size,0,0,DSBLOCK_ENTIREBUFFER)=DSERR_BUFFERLOST do
-      PlayBuffer.Restore;
-      PlayBuffer.Play(0,0,DSCBSTART_LOOPING);
+      while PlayBuffer^.Lock(PlayBuffer^,0,size,@Samples,@size,0,0,DSBLOCK_ENTIREBUFFER)=DSERR_BUFFERLOST do
+      PlayBuffer^.Restore(PlayBuffer^);
+      PlayBuffer^.Play(PlayBuffer^,0,0,DSCBSTART_LOOPING);
       EnableSound:=1;
     end;
   end;
@@ -857,18 +918,19 @@ begin
   k:=$EE*640-15;
   for i:=1 to 12 do
   begin
-    Buf:=' КАПИТАЛШОУ '[i];     //╩└╧╚╥└╦╪╬╙
+    Buf[0]:=' КАПИТАЛШОУ '[i];     //╩└╧╚╥└╦╪╬╙
+    Buf[1]:=#0;
     inc(k,50);
     if i=9 then
       inc(k,15);
-    Print(Buf,k-641,0,14,8);
-    Print(Buf,k-639,0,14,8);
-    Print(Buf,k+639,0,14,8);
-    Print(Buf,k+641,0,14,8);
-    Print(Buf,k+640+639,0,14,8);
-    Print(Buf,k+640+641,0,14,8);
-    Print(Buf,k,15,14,8);
-    Print(Buf,k+640,15,14,8);
+    Print(@Buf,k-641,0,14,8);
+    Print(@Buf,k-639,0,14,8);
+    Print(@Buf,k+639,0,14,8);
+    Print(@Buf,k+641,0,14,8);
+    Print(@Buf,k+640+639,0,14,8);
+    Print(@Buf,k+640+641,0,14,8);
+    Print(@Buf,k,15,14,8);
+    Print(@Buf,k+640,15,14,8);
     inc(j,100);
     Sound(j,10);
     delay(250);
@@ -885,7 +947,7 @@ begin
   WaitForSingleObject(KeyPressed,INFINITE);
 
   //Decrypt the vocabulary
-  val(Questions[0],QuestionsCount,i);
+  QuestionsCount:=str2int(@Questions[0][1]);
   for j:=QuestionsCount+QuestionsCount downto 1 do
     for i:=ord(Questions[j,0]) downto 1 do
       Questions[j][i]:=chr(ord(Questions[j][i])-32);
@@ -924,7 +986,6 @@ begin
   CurSector:=0;
   Winner:=3;
   Stage:=0;
-  AvailableLetters[0]:=#32; //string length - needs for print
   repeat
     //Floor
     FillRect($11580,238,640,7);
@@ -952,7 +1013,7 @@ begin
       end;
       dec(k,16);
     end;  
-    Print(StageNames[Stage],78*640+125+12*16-(length(StageNames[Stage]) shr 1 shl 4),0,14,16);
+    Print(@StageNames[Stage][1],78*640+125+12*16-(ord(StageNames[Stage][0]) shr 1 shl 4),0,14,16);
 
     //Leonid Yakubovich
     DrawSprite(Sprites[YAKUBOVICH_BASE],$1E0+$AC*640,7);
@@ -963,7 +1024,7 @@ begin
     j:=332*640+31*20;
     for i:=31 downto 0 do
     begin
-      AvailableLetters[i+1]:=chr(i+$80);
+      AvailableLetters[i]:=chr(i+$80);
       DrawSprite(Sprites[LETTER_BACK0],j,8);
       dec(j,20);
     end;
@@ -984,7 +1045,7 @@ begin
         FillRect(LabelOfs,28,108,7);
         for i:=3 downto 0 do
         begin
-          Print(Caption,LabelOfs+14,(i and 1)*7,14,8);
+          Print(@Caption[1],LabelOfs+14,(i and 1)*7,14,8);
           Sound(i*10+100,20);
           Delay(120);
         end;
@@ -1014,11 +1075,12 @@ begin
             if CharId=length(Characters) then
               CharId:=0;
           end;
+          Name[ord(Name[0])+1]:=#0;
         end;  
         DrawSprite(Sprite.ptr,Sprite.ofs,2);
-        Print(Name,LabelOfs+54-(length(Name) shl 2)+14*640,0,14,8);
+        Print(@Name[1],LabelOfs+54-(ord(Name[0]) shl 2)+14*640,0,14,8);
         DrawFortuneWheel(0);
-        UpdateMoney(j);      
+        UpdateMoney(j);
         Delay(500);
         inc(j);
       end;
@@ -1034,8 +1096,9 @@ begin
     PrevWords[Stage]:=CurWord;
 
     //Draw word letter-bars
-    GuessedWord:=@Questions[CurWord*2+1];
-    RemaindLetters:=ord(GuessedWord^[0]);
+    move(Questions[CurWord*2+1],GuessedWord,sizeof(TQuestion));
+    GuessedWord[ord(GuessedWord[0])+1]:=#0;
+    RemaindLetters:=ord(GuessedWord[0]);
     WordPos:=$19*640+121+12*16-(RemaindLetters shr 1 shl 4);
     for i:=RemaindLetters-1 downto 0 do
       FillRect((i shl 4)+WordPos+11*640,19,14,8);
@@ -1044,7 +1107,10 @@ begin
     YakubovichTalk('Начинаем игру!','Загадано слово:');                        //═рўшэрхь шуЁє! ╟рурфрэю ёыютю:'
     WaitForSingleObject(KeyPressed,2500);
     YakubovichSetSilent;
-    YakubovichTalk('Тема:',Questions[CurWord*2]);                              //╥хьр:
+    i:=ord(Questions[CurWord*2][0]);
+    move(Questions[CurWord*2][1],Buf,i);
+    Buf[i]:=#0;
+    YakubovichTalk('Тема:',@Buf);                                              //╥хьр:
     WaitForSingleObject(KeyPressed,INFINITE);
     YakubovichSetSilent;
 
@@ -1123,13 +1189,13 @@ begin
         end;
 
         //Rotate the fortune wheel suggestion
-        YakubovichTalk(Caption,'Вращайте барабан!');                           //┬Ёр∙рщЄх срЁрсрэ!
+        YakubovichTalk(@Caption[1],'Вращайте барабан!');                       //┬Ёр∙рщЄх срЁрсрэ!
         if (Sprite.ptr=Sprites[PLAYER])and(PlayerDecision('Скажу   Кручу','СЛОВО  БАРАБАН','Слово!','Поехали!')=0) then //╤ърцє ╤╦╬┬╬ ╩Ёєўє ┴└╨└┴└═
         begin
           //Tell the word
           Buf[0]:=#0;
           UserInput.Buf:=@Buf;
-          UserInput.MaxLen:=ord(GuessedWord^[0]);
+          UserInput.MaxLen:=ord(GuessedWord[0]);
           UserInput.Ofs:=WordPos+13*640+4;
           UserInput.Span:=16;
           k:=UserInput.MaxLen shl 4;
@@ -1142,7 +1208,8 @@ begin
           end;
           WaitForSingleObject(Enter,INFINITE);
           UserInput.MaxLen:=0;
-          if GuessedWord^=Buf then
+          Buf[ord(Buf[0])+1]:=#0;
+          if lstrcmpA(@GuessedWord[1],@Buf[1])=0 then
           begin
             YakubovichTalk('Вы совершенно','правы!!');                         //┬√ ёютхЁ°хээю яЁрт√!!
             WaitForSingleObject(KeyPressed,2500);
@@ -1201,13 +1268,13 @@ begin
                     HandStep:=16;
                     HandOfs:=WordPos-13*640;
                     HandMin:=HandOfs;
-                    HandMax:=HandOfs+(ord(GuessedWord^[0]) shl 4)-16;
+                    HandMax:=HandOfs+(ord(GuessedWord[0]) shl 4)-16;
                     HandOfsPrev:=12*640+$C8;
                     repeat
                       ScreenCopy(15,26,HandOfsPrev,BACKBUF+HandOfsPrev);
                       DrawSprite(Sprites[HAND],HandOfs,2);
                       n:=(HandOfs-HandMin+16) shr 4;
-                      i:=ord(GuessedWord^[n])-$7F;
+                      i:=ord(GuessedWord[n])-$80;
                       if WaitForSingleObject(KeyPressed,0)=WAIT_OBJECT_0 then
                         if AvailableLetters[i]=' ' then
                           Sound(1000,32)
@@ -1218,8 +1285,8 @@ begin
                   end
                   else
                     repeat
-                      n:=random(ord(GuessedWord^[0]))+1;
-                      i:=ord(GuessedWord^[n])-$7F;
+                      n:=random(ord(GuessedWord[0]))+1;
+                      i:=ord(GuessedWord[n])-$80;
                     until AvailableLetters[i]<>' ';
                   goto OpenLetter;
                   end;
@@ -1250,8 +1317,8 @@ begin
                     i:=3;
                     j:=100;
                     repeat
-                      buf[0]:=chr(wsprintfA(@buf[1],'%s рублей?',@Values[i][1]));
-                      YakubovichTalk('ПРИЗ или',buf);
+                      buf[wsprintfA(@buf,'%s рублей?',Values[i])]:=#0;
+                      YakubovichTalk('ПРИЗ или',@buf);
                       if PlayerDecision('Беру    Беру','ПРИЗ   ДЕНЬГИ','Приз!','Деньги.')>0 then //┴хЁє ╧╨╚╟ ┴хЁє ─┼═▄├╚
                       begin
                         YakubovichTalk('Забирайте','свои ДЕНЬГИ!');            //╟рсшЁрщЄх ётюш ─┼═▄├╚!
@@ -1267,8 +1334,9 @@ begin
                         YakubovichTalk('Забирайте','свой ПРИЗ!');                                                              //╟рсшЁрщЄх ётющ ╧╨╚╟!
                         Print('Вы выбрали ПРИЗ и мы Вас поздравляем!',208*640+92,0,14,8);                                      //┬√ т√сЁрыш ╧╨╚╟ ш ь√ ┬рё яючфЁрты хь!
                         Print('Фирма ИНТЕРМОДА и ПОЛЕ ЧУДЕС дарит Вам',226*640+88,0,14,8);                                     //╘шЁьр ╚═╥┼╨╠╬─└ ш ╧╬╦┼ ╫╙─┼╤ фрЁшЄ ┬рь
-                        buf[0]:=chr(wsprintfA(@buf[1],'%s компании PROCTER & GAMBLE!',@Prizes[random(10)][1]));                //%s ъюьярэшш PROCTER & GAMBLE!
-                        Print(buf,244*640+240-ord(buf[0]) shl 2,0,14,8);
+                        buf[0]:=chr(wsprintfA(@buf[1],'%s компании PROCTER & GAMBLE!',Prizes[random(10)]));                    //%s ъюьярэшш PROCTER & GAMBLE!
+                        Buf[ord(Buf[0])+1]:=#0;
+                        Print(@buf[1],244*640+240-ord(buf[0]) shl 2,0,14,8);
                         Print('За ПРИЗОМ обращайтесь по адресу:',262*640+112,0,14,8);                                          //╟р ╧╨╚╟╬╠ юсЁр∙рщЄхё№ яю рфЁхёє:
                         Print('101000-Ц, Москва, проезд Серова, 11',280*640+100,0,14,8);                                       //101000-╓, ╠юёътр, яЁюхчф ╤хЁютр, 11
                         Print('На конверте сделайте пометку КОМПЬЮТЕРНЫЙ ПРИЗ',298*640+56,0,14,8);                             //═р ъюэтхЁЄх ёфхырщЄх яюьхЄъє ╩╬╠╧▄▐╥┼╨═█╔ ╧╨╚╟
@@ -1293,8 +1361,8 @@ begin
           else
           begin
             size:=Score+SectorValues[i];
-            buf[0]:=chr(wsprintfA(@buf[1],'У вас %u очков!',SectorValues[i])); //╙ трё %u юўъют!
-            YakubovichTalk(buf,'Назовите букву!');                             //═рчютшЄх сєътє!
+            buf[wsprintfA(@buf,'У вас %u очков!',SectorValues[i])]:=#0;        //╙ трё %u юўъют!
+            YakubovichTalk(@buf,'Назовите букву!');                            //═рчютшЄх сєътє!
             ChooseLetter:
             ScreenCopy(640,60,BACKBUF+$59B0*8,$59B0*8);
 
@@ -1309,7 +1377,7 @@ begin
               repeat
                 ScreenCopy(15,26,HandOfsPrev,BACKBUF+HandOfsPrev);
                 DrawSprite(Sprites[HAND],HandOfs,2);
-                i:=(HandOfs-$13A*640+20) div 20;
+                i:=(HandOfs-$13A*640) div 20;
                 if WaitForSingleObject(KeyPressed,0)=WAIT_OBJECT_0 then
                   if AvailableLetters[i]=' ' then
                     Sound(1000,32)
@@ -1318,27 +1386,28 @@ begin
               until false;
               ScreenCopy(20,26,HandOfs,BACKBUF+HandOfs);
             end
-            else if (RemaindLetters shl 1<ord(GuessedWord^[0]))and(random(Stage+2)>0) then
+            else if (RemaindLetters shl 1<ord(GuessedWord[0]))and(random(Stage+2)>0) then
               repeat
-                i:=ord(GuessedWord^[random(ord(GuessedWord^[0]))+1])-$7F;
+                i:=ord(GuessedWord[random(ord(GuessedWord[0]))+1])-$80;
               until AvailableLetters[i]<>' '
             else
               repeat
-                i:=random(32)+1;
+                i:=random(32);
               until AvailableLetters[i]<>' ';
 
             OpenLetter:
             Sound(100,32);
-            C:=AvailableLetters[i];
+            C[0]:=AvailableLetters[i];
+            C[1]:=#0;
             AvailableLetters[i]:=' ';
 
             if n=0 then
-              PlayerTalk(TalkBubbleOfs,'Буква %c',ord(C)) //┴єътр %c
+              PlayerTalk(TalkBubbleOfs,'Буква %c',ord(C[0])) //┴єътр %c
             else
               PlayerTalk(TalkBubbleOfs,'%u-я буква',n);   //%u-  сєътр
 
             //Letter disapper effect
-            f:=$14C*640+i*20-20;
+            f:=$14C*640+i*20;
             for i:=0 to 3 do
             begin
               if i<3 then
@@ -1358,8 +1427,8 @@ begin
             k:=0;
             AssistPos[0]:=$19*640+639;
             //Counting letters for open and assist stop-positions calculation
-            for j:=ord(GuessedWord^[0])-1 downto 0 do
-              if GuessedWord^[j+1]=C then
+            for j:=ord(GuessedWord[0])-1 downto 0 do
+              if GuessedWord[j+1]=C then
               begin
                 inc(k);
                 AssistPos[k]:=WordPos+(j shl 4);
@@ -1444,7 +1513,7 @@ begin
           goto Adware;
       until false;
     until RemaindLetters=0;
-    YakubovichTalk(PlayerNames[CurPlayer],'выиграл раунд!');        //%PlayerName% т√шуЁры Ёрєэф!
+    YakubovichTalk(@PlayerNames[CurPlayer][1],'выиграл раунд!');        //%PlayerName% т√шуЁры Ёрєэф!
     WaitForSingleObject(KeyPressed,1000);
     Winner:=CurPlayer;
 
@@ -1498,13 +1567,16 @@ begin
       DrawSprite(Sprites[YAKUBOVICH_PASSIVE],$AD*640+$1FF,16);
       DrawSprite(Sprites[YAKUBOVICH_EYES_OPEN],$D1*640+$214,16);
 
-      Buf:='Товарищ '+Name+'!';                                                                            //╥ютрЁш∙ %PlayerName%!
-      print(Buf,$BE*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
-      Buf[0]:=AnsiChar(wsprintfA(@Buf[1],'Вы выиграли в ФИНАЛЕ и набрали %u очков!',Score));               //┬√ т√шуЁрыш т ╘╚═└╦┼ ш эрсЁрыш %u юўъют!
-      print(Buf,($BE+$12)*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
+      Buf[0]:=chr(wsprintfA(@Buf[1],'Товарищ %s!',@Name[1]));
+      Buf[ord(Buf[0])+1]:=#0;                                                                              //╥ютрЁш∙ %PlayerName%!
+      print(@Buf[1],$BE*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
+      Buf[0]:=chr(wsprintfA(@Buf[1],'Вы выиграли в ФИНАЛЕ и набрали %u очков!',Score));                    //┬√ т√шуЁрыш т ╘╚═└╦┼ ш эрсЁрыш %u юўъют!
+      Buf[ord(Buf[0])+1]:=#0;
+      print(@Buf[1],($BE+$12)*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
       print('Торговый дом ТУСАР и ПОЛЕ ЧУДЕС дарит Вам',$2354C,0,14,8);                                    //╥юЁуют√щ фюь ╥╙╤└╨ ш ╧╬╦┼ ╫╙─┼╤ фрЁшЄ ┬рь
-      Buf:=Prizes[random(length(Prizes))]+' компании PROCTER & GAMBLE!';                                   // ъюьярэшш PROCTER & GAMBLE!
-      print(Buf,($BE+$12+$12+$12)*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
+      Buf[0]:=chr(wsprintfA(@Buf[1],'%s компании PROCTER & GAMBLE!',Prizes[random(length(Prizes))]));      // ъюьярэшш PROCTER & GAMBLE!
+      Buf[ord(Buf[0])+1]:=#0;
+      print(@Buf[1],($BE+$12+$12+$12)*640+$F0-(ord(Buf[0]) shl 2),0,14,8);
       print('За ПРИЗОМ обращайтесь по адресу:',$28F70,0,14,8);                                             //╟р ╧╨╚╟╬╠ юсЁр∙рщЄхё№ яю рфЁхёє:
       print('101000-Ц, Москва, проезд Серова, 11',$2BC64,0,14,8);                                          //101000-╓, ╠юёътр, яЁюхчф ╤хЁютр, 11
       print('На конверте сделайте пометку КОМПЬЮТЕРНЫЙ ПРИЗ',$2E938,0,14,8);                               //═р ъюэтхЁЄх ёфхырщЄх яюьхЄъє ╩╬╠╧▄▐╥┼╨═█╔ ╧╨╚╟
@@ -1548,14 +1620,13 @@ begin
       for i:=0 to 7 do
         with TopPlayers[i] do
         begin
-          Buf:=AnsiChar(i+49)+' '+Name;
-          print(Buf,j+$1E1,8,14,8);
-          print(Buf,j+$1E0,8,14,8);
-          str(Score:4,Buf);
-          Buf:=Buf+'$';
+          Buf[wsprintfA(@Buf,'%u %s',i,@Name[1])]:=#0;
+          print(@Buf,j+$1E1,8,14,8);
+          print(@Buf,j+$1E0,8,14,8);
+          Buf[wsprintfA(@Buf,'%0000u$',Score,@Name[1])]:=#0;
           k:=(ord(i=n) shl 1)+3;
-          print(Buf,j+$24F,k,14,8);
-          print(Buf,j+$24E,k,14,8);
+          print(@Buf,j+$24F,k,14,8);
+          print(@Buf,j+$24E,k,14,8);
           inc(j,14*640);
         end;
       //Animate list  
@@ -1576,9 +1647,10 @@ begin
 end;
 
 begin
-  wnd:=CreateWindowExW(0,'STATIC',0,WS_VISIBLE+WS_CAPTION+WS_SYSMENU+WS_MINIMIZEBOX,0,0,640,350,0,0,0,0);
+  wnd:=CreateWindowExW(0,'STATIC',0,WS_VISIBLE+WS_OVERLAPPEDWINDOW,0,0,640,350,0,0,0,0);
 
   RegisterHotKey(wnd,1,MOD_CONTROL,$53);      //CTRL+S hotkey
+  RegisterHotKey(wnd,2,MOD_ALT,VK_RETURN);    //Alt+Enter hotkey
   KeyPressed:=CreateEventW(0,false,false,''); //Event for Space key and left mouse button
   Enter:=CreateEventW(0,false,false,'');      //Event for Enter key
 
@@ -1587,6 +1659,7 @@ begin
   Rect.Right:=640+640-Rect.Right;
   Rect.Bottom:=350+350-Rect.Bottom;
   MoveWindow(wnd,(GetSystemMetrics(SM_CXSCREEN)-Rect.Right) shr 1,(GetSystemMetrics(SM_CYSCREEN)-Rect.Bottom) shr 1,Rect.Right,Rect.Bottom,false);
+  GetWindowRect(wnd,Rect);
 
   //Redraw timer - 50 FPS
   SetTimer(wnd,1,20,0);

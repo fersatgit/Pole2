@@ -134,58 +134,48 @@ type
   DSBPOSITIONNOTIFY = _DSBPOSITIONNOTIFY;
   TDSBPositionNotify = _DSBPOSITIONNOTIFY;
 
-  IReferenceClock = interface(IUnknown)
-    ['{56a86897-0ad4-11ce-b03a-0020af0ba770}']
-    function GetTime(out pTime: TReferenceTime): HResult; stdcall;
-    function AdviseTime(rtBaseTime, rtStreamTime: TReferenceTime; hEvent: THandle; out pdwAdviseCookie: DWORD): HResult; stdcall;
-    function AdvisePeriodic(const rtStartTime, rtPeriodTime: TReferenceTime; hSemaphore: THandle; out pdwAdviseCookie: DWORD): HResult; stdcall;
-    function Unadvise(dwAdviseCookie: DWORD): HResult; stdcall;
-  end;
-  IID_IReferenceClock = IReferenceClock;
+  PDirectSoundBuffer=^IDirectSoundBuffer;
+  PPDirectSoundBuffer=^PDirectSoundBuffer;
 
-  IDirectSoundBuffer = interface;
+  IDirectSound = packed record
+                 QueryInterface:       function(var this;out pp): HResult;stdcall;
+                 AddRef:               function(var this): HResult; stdcall;
+                 Release:              function(var this): HResult; stdcall;
+                 CreateSoundBuffer:    function(var this;const pcDSBufferDesc: TDSBufferDesc; out ppDSBuffer: PPDirectSoundBuffer; pUnkOuter: pointer): HResult; stdcall;
+                 GetCaps:              function(var this;out pDSCaps: TDSCaps): HResult; stdcall;
+                 DuplicateSoundBuffer: function(var this;pDSBufferOriginal: PPDirectSoundBuffer; out ppDSBufferDuplicate: PPDirectSoundBuffer): HResult; stdcall;
+                 SetCooperativeLevel:  function(var this;hwnd: HWND; dwLevel: DWORD): HResult; stdcall;
+                 Compact:              function(var this): HResult; stdcall;
+                 GetSpeakerConfig:     function(var this;out pdwSpeakerConfig: DWORD): HResult; stdcall;
+                 SetSpeakerConfig:     function(var this;dwSpeakerConfig: DWORD): HResult; stdcall;
+                 Initialize:           function(var this;pcGuidDevice: PGUID): HResult; stdcall;
+                 end;
+  PDirectSound=^IDirectSound;
+  PPDirectSound=^PDirectSound;
 
-  IDirectSound = interface(IUnknown)
-    ['{279AFA83-4981-11CE-A521-0020AF0BE560}']
-    function CreateSoundBuffer(const pcDSBufferDesc: TDSBufferDesc; out ppDSBuffer: IDirectSoundBuffer; pUnkOuter: IUnknown): HResult; stdcall;
-    function GetCaps(out pDSCaps: TDSCaps): HResult; stdcall;
-    function DuplicateSoundBuffer(pDSBufferOriginal: IDirectSoundBuffer; out ppDSBufferDuplicate: IDirectSoundBuffer): HResult; stdcall;
-    function SetCooperativeLevel(hwnd: HWND; dwLevel: DWORD): HResult; stdcall;
-    function Compact: HResult; stdcall;
-    function GetSpeakerConfig(out pdwSpeakerConfig: DWORD): HResult; stdcall;
-    function SetSpeakerConfig(dwSpeakerConfig: DWORD): HResult; stdcall;
-    function Initialize(pcGuidDevice: PGUID): HResult; stdcall;
+  IDirectSoundBuffer = packed record
+    QueryInterface:       function(var this;out pp): HResult;stdcall;
+    AddRef:               function(var this): HResult; stdcall;
+    Release:              function(var this): HResult; stdcall;
+    GetCaps:              function(var this;var pDSBufferCaps: TDSBcaps): HResult; stdcall;
+    GetCurrentPosition:   function(var this;pdwCurrentPlayCursor, pdwCurrentWriteCursor: PDWORD): HResult; stdcall;
+    GetFormat:            function(var this;pwfxFormat: PWaveFormatEx; dwSizeAllocated: DWORD; pdwSizeWritten: PDWORD): HResult; stdcall;
+    GetVolume:            function(var this;out plVolume: Longint): HResult; stdcall;
+    GetPan:               function(var this;out plPan: Longint): HResult; stdcall;
+    GetFrequency:         function(var this;out pdwFrequency: DWORD): HResult; stdcall;
+    GetStatus:            function(var this;out pdwStatus: DWORD): HResult; stdcall;
+    Initialize:           function(var this;pDirectSound: IDirectSound; const pcDSBufferDesc: TDSBufferDesc): HResult; stdcall;
+    Lock:                 function(var this;dwOffset, dwBytes: DWORD; ppvAudioPtr1: PPointer; pdwAudioBytes1: PDWORD; ppvAudioPtr2: PPointer; pdwAudioBytes2: PDWORD; dwFlags: DWORD): HResult; stdcall;
+    Play:                 function(var this;dwReserved1, dwPriority, dwFlags: DWORD): HResult; stdcall;
+    SetCurrentPosition:   function(var this;dwNewPosition: DWORD): HResult; stdcall;
+    SetFormat:            function(var this;pcfxFormat: PWaveFormatEx): HResult; stdcall;
+    SetVolume:            function(var this;lVolume: Longint): HResult; stdcall;
+    SetPan:               function(var this;lPan: Longint): HResult; stdcall;
+    SetFrequency:         function(var this;dwFrequency: DWORD): HResult; stdcall;
+    Stop:                 function(var this): HResult; stdcall;
+    Unlock:               function(var this;pvAudioPtr1: Pointer; dwAudioBytes1: DWORD; pvAudioPtr2: Pointer; dwAudioBytes2: DWORD): HResult; stdcall;
+    Restore:              function(var this): HResult; stdcall;
   end;
-  IID_IDirectSound = IDirectSound;
-
-  IDirectSoundBuffer = interface(IUnknown)
-    ['{279AFA85-4981-11CE-A521-0020AF0BE560}']
-    function GetCaps(var pDSBufferCaps: TDSBcaps): HResult; stdcall;
-    function GetCurrentPosition(pdwCurrentPlayCursor, pdwCurrentWriteCursor: PDWORD): HResult; stdcall;
-    function GetFormat(pwfxFormat: PWaveFormatEx; dwSizeAllocated: DWORD; pdwSizeWritten: PDWORD): HResult; stdcall;
-    function GetVolume(out plVolume: Longint): HResult; stdcall;
-    function GetPan(out plPan: Longint): HResult; stdcall;
-    function GetFrequency(out pdwFrequency: DWORD): HResult; stdcall;
-    function GetStatus(out pdwStatus: DWORD): HResult; stdcall;
-    function Initialize(pDirectSound: IDirectSound; const pcDSBufferDesc: TDSBufferDesc): HResult; stdcall;
-    function Lock(dwOffset, dwBytes: DWORD; ppvAudioPtr1: PPointer; pdwAudioBytes1: PDWORD; ppvAudioPtr2: PPointer; pdwAudioBytes2: PDWORD; dwFlags: DWORD): HResult; stdcall;
-    function Play(dwReserved1, dwPriority, dwFlags: DWORD): HResult; stdcall;
-    function SetCurrentPosition(dwNewPosition: DWORD): HResult; stdcall;
-    function SetFormat(pcfxFormat: PWaveFormatEx): HResult; stdcall;
-    function SetVolume(lVolume: Longint): HResult; stdcall;
-    function SetPan(lPan: Longint): HResult; stdcall;
-    function SetFrequency(dwFrequency: DWORD): HResult; stdcall;
-    function Stop: HResult; stdcall;
-    function Unlock(pvAudioPtr1: Pointer; dwAudioBytes1: DWORD; pvAudioPtr2: Pointer; dwAudioBytes2: DWORD): HResult; stdcall;
-    function Restore: HResult; stdcall;
-  end;
-  IID_IDirectSoundBuffer = IDirectSoundBuffer;
-
-  IDirectSoundNotify = interface(IUnknown)
-    ['{b0210783-89cd-11d0-af08-00a0c925cd16}']
-    function SetNotificationPositions(dwPositionNotifies: DWORD; pcPositionNotifies: PDSBPositionNotify): HResult; stdcall;
-  end;
-  IID_IDirectSoundNotify = IDirectSoundNotify;
 
 const
   DS_OK                           = S_OK;
@@ -320,9 +310,4 @@ const
   DS_CERTIFIED                = $00000000;
   DS_UNCERTIFIED              = $00000001;
 
-type
-  TDSEnumCallbackA = function(lpGuid: PGUID; lpcstrDescription, lpcstrModule: PAnsiChar;lpContext: Pointer): BOOL; stdcall;
-  TDSEnumCallbackW = function(lpGuid: PGUID; lpcstrDescription, lpcstrModule: PWideChar;lpContext: Pointer): BOOL; stdcall;
-  TDSEnumCallback = TDSEnumCallbackA;
-
-function DirectSoundCreate(lpGuid: PGUID; out ppDS: IDirectSound; pUnkOuter: IUnknown): HResult; stdcall; external 'dsound.dll';
+function DirectSoundCreate(lpGuid: PGUID; out ppDS: PPDirectSound; pUnkOuter: pointer): HResult; stdcall; external 'dsound.dll';
